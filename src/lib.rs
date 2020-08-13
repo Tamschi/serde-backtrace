@@ -204,7 +204,9 @@ impl<'de, A: de::MapAccess<'de>> de::MapAccess<'de> for MapAccess<A> {
     {
         self.0
             .next_key_seed(Seed(seed))
-            .map_err(|e| de::Error::custom(&format_args!("[K {}]{}", self.1, e)))
+            .map_err(|e| de::Error::custom(&format_args!("[K {}]{}", self.1, e)))?
+            .map(serde_backtrace)
+            .pipe(Ok)
     }
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
@@ -213,7 +215,8 @@ impl<'de, A: de::MapAccess<'de>> de::MapAccess<'de> for MapAccess<A> {
         let value = self
             .0
             .next_value_seed(Seed(seed))
-            .map_err(|e| de::Error::custom(&format_args!("[V {}]{}", self.1, e)))?;
+            .map_err(|e| de::Error::custom(&format_args!("[V {}]{}", self.1, e)))?
+            .pipe(serde_backtrace);
         self.1 += 1;
         Ok(value)
     }
@@ -252,6 +255,7 @@ impl<'de, A: de::EnumAccess<'de>> de::EnumAccess<'de> for EnumAccess<A> {
             .variant_seed(Seed(seed))
             .map(|(value, variant)| (value, VariantAccess(variant)))
             .map_err(|e| de::Error::custom(&format_args!("in enum variant: {}", e)))
+            .map(|(a, b)| (serde_backtrace(a), b))
     }
 }
 
@@ -265,7 +269,7 @@ impl<'de, A: de::VariantAccess<'de>> de::VariantAccess<'de> for VariantAccess<A>
     where
         T: de::DeserializeSeed<'de>,
     {
-        self.0.newtype_variant_seed(Seed(seed))
+        self.0.newtype_variant_seed(Seed(seed)).map(serde_backtrace)
     }
     fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -285,9 +289,9 @@ impl<'de, A: de::VariantAccess<'de>> de::VariantAccess<'de> for VariantAccess<A>
     }
 }
 
-struct Seed<S>(S);
+pub struct Seed<S>(pub S);
 impl<'de, S: de::DeserializeSeed<'de>> de::DeserializeSeed<'de> for Seed<S> {
-    type Value = S::Value;
+    type Value = Backtraced<S::Value>;
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -295,6 +299,7 @@ impl<'de, S: de::DeserializeSeed<'de>> de::DeserializeSeed<'de> for Seed<S> {
         self.0
             .deserialize(Deserializer(deserializer))
             .map_err(|e| de::Error::custom(&format_args!("->{}", e)))
+            .map(Backtraced)
     }
 }
 
